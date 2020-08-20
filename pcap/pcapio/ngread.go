@@ -139,6 +139,9 @@ func (r *NgReader) readBlock() (ngBlockType, []byte, error) {
 	if err != nil {
 		if err == peeker.ErrTruncated {
 			fmt.Fprintln(os.Stderr, "DEBUG: truncated pcap-ng header:", len(hdr), hdr)
+			if len(hdr) > 0 {
+				r.Reader.Read(len(hdr))
+			}
 			err = nil
 		}
 		return 0, nil, err
