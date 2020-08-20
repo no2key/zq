@@ -42,7 +42,7 @@ func NewNgReader(r io.Reader) (*NgReader, error) {
 	hdr, err := ret.Peek(12)
 	if err != nil {
 		if err == peeker.ErrTruncated {
-			fmt.Fprintln(os.Stderr, "DEBUG: truncated pcap-ng header at start-of-file: \n", len(hdr), hdr)
+			fmt.Fprintln(os.Stderr, "DEBUG: truncated pcap-ng header at start-of-file:", len(hdr), hdr)
 		}
 		return nil, err
 	}
@@ -138,7 +138,7 @@ func (r *NgReader) readBlock() (ngBlockType, []byte, error) {
 	hdr, err := r.Peek(12)
 	if err != nil {
 		if err == peeker.ErrTruncated {
-			fmt.Fprintln(os.Stderr, "DEBUG: truncated pcap-ng header: \n", len(hdr), hdr)
+			fmt.Fprintln(os.Stderr, "DEBUG: truncated pcap-ng header:", len(hdr), hdr)
 			err = nil
 		}
 		return 0, nil, err
