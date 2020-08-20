@@ -12,7 +12,9 @@ package pcapio
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
+	"os"
 	"time"
 
 	"github.com/brimsec/zq/pkg/nano"
@@ -39,6 +41,9 @@ func NewNgReader(r io.Reader) (*NgReader, error) {
 	}
 	hdr, err := ret.Peek(12)
 	if err != nil {
+		if err == peeker.ErrTruncated {
+			fmt.Fprintln(os.Stderr, "DEBUG: truncated pcap-ng header at start-of-file: \n", len(hdr), hdr)
+		}
 		return nil, err
 	}
 	// ensure first block is correct
@@ -132,6 +137,10 @@ func (r *NgReader) getUint64(buffer []byte) uint64 {
 func (r *NgReader) readBlock() (ngBlockType, []byte, error) {
 	hdr, err := r.Peek(12)
 	if err != nil {
+		if err == peeker.ErrTruncated {
+			fmt.Fprintln(os.Stderr, "DEBUG: truncated pcap-ng header: \n", len(hdr), hdr)
+			err = nil
+		}
 		return 0, nil, err
 	}
 	typ := ngBlockType(r.getUint32(hdr[:4]))
