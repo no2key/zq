@@ -1,0 +1,200 @@
+package zst
+
+import (
+	"fmt"
+
+	"github.com/brimsec/zq/pkg/bufwriter"
+	"github.com/brimsec/zq/pkg/iosrc"
+	"github.com/brimsec/zq/zcode"
+	"github.com/brimsec/zq/zio"
+	"github.com/brimsec/zq/zio/zngio"
+	"github.com/brimsec/zq/zng"
+	"github.com/brimsec/zq/zng/resolver"
+	"github.com/brimsec/zq/zst/column"
+)
+
+//XXX
+const (
+	MaxColThresh  = 20 * 1024 * 1024
+	MaxSkewThresh = 512 * 1024 * 1024
+)
+
+// Writer implements the zbuf.Writer interface. A Writer creates a columnar
+// zst object from a stream of zng.Records.
+type Writer struct {
+	uri        iosrc.URI
+	zctx       *resolver.Context //XXX don't think we need this
+	rctx       *resolver.Context
+	writer     *bufwriter.Writer
+	spiller    *column.Spiller
+	schemaMap  map[int]int
+	schemas    []column.RecordWriter
+	types      []*zng.TypeRecord
+	skewThresh int
+	colThresh  int
+	// We keep track of the size of rows we've encoded into in-memory
+	// data structures.  This is roughtly propertional to the amount of
+	// memory used and the max amount of skew between rows that will be
+	// needed for reader-side buffering.  So when the memory footprint
+	// exceeds the confired skew theshhold, we flush the columns to storage.
+	footprint int
+}
+
+func NewWriter(zctx *resolver.Context, path string, skewThresh, colThresh int) (*Writer, error) {
+	if err := checkThresh("skew", MaxSkewThresh, skewThresh); err != nil {
+		return nil, err
+	}
+	if err := checkThresh("column", MaxColThresh, colThresh); err != nil {
+		return nil, err
+	}
+	uri, err := iosrc.ParseURI(path)
+	if err != nil {
+		return nil, err
+	}
+	w, err := iosrc.NewWriter(uri)
+	if err != nil {
+		return nil, err
+	}
+	writer := bufwriter.New(w)
+	return &Writer{
+		zctx:       zctx,
+		rctx:       resolver.NewContext(),
+		uri:        uri,
+		spiller:    column.NewSpiller(writer, colThresh),
+		writer:     writer,
+		schemaMap:  make(map[int]int),
+		skewThresh: skewThresh,
+		colThresh:  colThresh,
+	}, nil
+}
+
+func checkThresh(which string, max, thresh int) error {
+	if thresh == 0 {
+		return fmt.Errorf("zst %s threshold cannot be zero", which)
+	}
+	if thresh > max {
+		return fmt.Errorf("zst %s threshold too large (%d)", which, thresh)
+	}
+	return nil
+}
+
+func (w *Writer) Write(rec *zng.Record) error {
+	inputID := rec.Type.ID()
+	schemaID, ok := w.schemaMap[inputID]
+	if !ok {
+		recType, err := w.rctx.TranslateTypeRecord(rec.Type)
+		if err != nil {
+			return err
+		}
+		schemaID = len(w.schemas)
+		w.schemaMap[inputID] = schemaID
+		rw := column.NewRecordWriter(recType, w.spiller)
+		w.schemas = append(w.schemas, rw)
+		w.types = append(w.types, recType)
+	}
+	if err := w.schemas[schemaID].Write(rec.Raw); err != nil {
+		return err
+	}
+	w.footprint += len(rec.Raw)
+	if w.footprint >= w.skewThresh {
+		w.footprint = 0
+		return w.flush()
+	}
+	return nil
+}
+
+// Abort closes this writer, deleting any and all objects and/or files associated
+// with it.
+func (w *Writer) Abort() error {
+	firstErr := w.writer.Close()
+	if err := iosrc.Remove(w.uri); firstErr == nil {
+		firstErr = err
+	}
+	return firstErr
+}
+
+func (w *Writer) Close() error {
+	if err := w.finalize(); err != nil {
+		w.writer.Close()
+		return err
+	}
+	return w.writer.Close()
+}
+
+func (w *Writer) flush() error {
+	for _, col := range w.schemas {
+		if err := col.Flush(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (w *Writer) finalize() error {
+	if err := w.flush(); err != nil {
+		return err
+	}
+	// at this point all the column data has been written out
+	// to the underlying spiller.
+	// we start writing zng at this point.
+	zw := zngio.NewWriter(w.writer, zio.WriterFlags{})
+	dataSize := w.spiller.Position()
+
+	// First, write out empty records for each schemas.  These types
+	// are in the type context of the zng row reeader used to ingest
+	// all of the data.  Since they are put here first, when they are
+	// read fresh by the zst reader, the will exactly match the original schemas.
+	var b zcode.Builder
+	for _, schema := range w.types {
+		b.Reset()
+		for _, col := range schema.Columns {
+			if zng.IsContainerType(col.Type) {
+				b.AppendContainer(nil)
+			} else {
+				b.AppendPrimitive(nil)
+			}
+		}
+		rec := zng.NewRecord(schema, b.Bytes())
+		if err := zw.Write(rec); err != nil {
+			return err
+		}
+	}
+	// Now, write out the reassembly record for each schema.  Each record
+	// is highly nested and encodes all of the segmaps for every column stream
+	// needed to reconstruct all of the records of that schema.
+	for _, schema := range w.schemas {
+		b.Reset()
+		typ, err := schema.Encode(w.rctx, &b)
+		if err != nil {
+			return err
+		}
+		body, err := b.Bytes().ContainerBody()
+		if err != nil {
+			return err
+		}
+		rec := zng.NewRecord(typ.(*zng.TypeRecord), body)
+		if err := zw.Write(rec); err != nil {
+			return err
+		}
+	}
+	zw.EndStream()
+	columnSize := zw.Position()
+	sizes := []int64{dataSize, columnSize}
+	return writeTrailer(zw, w.rctx, w.skewThresh, w.colThresh, sizes)
+}
+
+func (w *Writer) writeEmptyTrailer() error {
+	zw := zngio.NewWriter(w.writer, zio.WriterFlags{})
+	return writeTrailer(zw, w.rctx, w.skewThresh, w.colThresh, nil)
+}
+
+func writeTrailer(w *zngio.Writer, zctx *resolver.Context, skewThresh, colThresh int, sizes []int64) error {
+	rec, err := newTrailerRecord(zctx, skewThresh, colThresh, sizes)
+	if err != nil {
+		return err
+	}
+	if err := w.Write(rec); err != nil {
+		return err
+	}
+	return w.EndStream()
+}
