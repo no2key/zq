@@ -3,7 +3,10 @@ package zq
 import (
 	"errors"
 	"flag"
+	"log"
 	"os"
+	"runtime"
+	"runtime/pprof"
 
 	"github.com/brimsec/zq/archive"
 	"github.com/brimsec/zq/cmd/zar/root"
@@ -35,6 +38,10 @@ func init() {
 }
 
 type Command struct {
+	cpuprofile string
+	memprofile string
+	cleanupFns []func()
+
 	*root.Command
 	forceBinary  bool
 	outputFile   string
@@ -47,6 +54,8 @@ type Command struct {
 
 func New(parent charm.Command, f *flag.FlagSet) (charm.Command, error) {
 	c := &Command{Command: parent.(*root.Command)}
+	f.StringVar(&c.cpuprofile, "cpuprofile", "", "write cpu profile to `file`")
+	f.StringVar(&c.memprofile, "memprofile", "", "write memory profile to `file`")
 	f.BoolVar(&c.forceBinary, "B", false, "allow binary zng output to a terminal")
 	f.StringVar(&c.outputFile, "o", "", "write data to output file")
 	f.BoolVar(&c.quiet, "q", false, "don't display zql warnings")
@@ -56,8 +65,43 @@ func New(parent charm.Command, f *flag.FlagSet) (charm.Command, error) {
 	c.writerFlags.SetFlags(f)
 	return c, nil
 }
+func (c *Command) cleanup(f func()) {
+	c.cleanupFns = append(c.cleanupFns, f)
+}
+
+func (c *Command) runCleanup() {
+	for _, fn := range c.cleanupFns {
+		fn()
+	}
+}
+
+func (c *Command) runCPUProfile() {
+	f, err := os.Create(c.cpuprofile)
+	if err != nil {
+		log.Fatal(err)
+	}
+	pprof.StartCPUProfile(f)
+	c.cleanup(pprof.StopCPUProfile)
+}
+
+func (c *Command) runMemProfile() {
+	f, err := os.Create(c.memprofile)
+	if err != nil {
+		log.Fatal(err)
+	}
+	runtime.GC()
+	pprof.Lookup("allocs").WriteTo(f, 0)
+	f.Close()
+}
 
 func (c *Command) Run(args []string) error {
+	defer c.runCleanup()
+	if c.cpuprofile != "" {
+		c.runCPUProfile()
+	}
+	if c.memprofile != "" {
+		c.cleanup(c.runMemProfile)
+	}
 	if c.outputFile == "-" {
 		c.outputFile = ""
 	}
