@@ -1,0 +1,23 @@
+script: |
+  source mockbrim.sh
+  zapi -h $ZQD_HOST new testsp 
+  kill -9 $BRIM_PID 2>/dev/null
+  >&2 echo "brim: $BRIM_PID zqd: $ZQD_PID"
+  function zqddead() { kill -0 $ZQD_PID && 1 || 0; }
+  awaitsuccess zqddead
+  >&2 echo "now running query"
+  zapi -h $ZQD_HOST ls || echo "could not connection to zqd"
+
+inputs:
+  - name: mockbrim.sh
+    source: mockbrim.sh
+  - name: awaitfile.sh
+    source: awaitfile.sh
+
+outputs:
+  - name: stdout
+    data: |
+      testsp: space created
+  - name: stderr
+    data: |
+      something went wrong

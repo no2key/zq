@@ -44,10 +44,14 @@ func init() {
 
 type Command struct {
 	*root.Command
-	listenAddr     string
-	conf           zqd.Config
-	pprof          bool
-	prom           bool
+	listenAddr string
+	conf       zqd.Config
+	pprof      bool
+	prom       bool
+	// brimfd is a file descriptor passed through by brim desktop, that zqd uses
+	// to determine if brim is still alive. If set zqd will exit if the fd is
+	// closed.
+	brimfd         int
 	zeekRunnerPath string
 	configfile     string
 	loggerConf     *logger.Config
@@ -68,6 +72,9 @@ func New(parent charm.Command, f *flag.FlagSet) (charm.Command, error) {
 	f.Var(&c.logLevel, "loglevel", "level for log output (defaults to info)")
 	f.BoolVar(&c.devMode, "dev", false, "runs zqd in development mode")
 	f.StringVar(&c.portFile, "portfile", "", "write port of http listener to file")
+
+	// hidden
+	f.IntVar(&c.brimfd, "brimfd", -2, "pipe")
 	return c, nil
 }
 
@@ -93,6 +100,11 @@ func (c *Command) Run(args []string) error {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	if c.brimfd != -2 {
+		if ctx, err = c.watchBrimFd(ctx); err != nil {
+			return err
+		}
+	}
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, os.Interrupt)
 	go func() {
@@ -121,6 +133,25 @@ func (c *Command) init() error {
 		return err
 	}
 	return c.initZeek()
+}
+
+func (c *Command) watchBrimFd(p context.Context) (context.Context, error) {
+	f := os.NewFile(uintptr(c.brimfd), "brimfd")
+	c.logger.Info("Listening to brim process pipe", zap.String("fd", f.Name()))
+	ctx, cancel := context.WithCancel(p)
+	b := make([]byte, 10)
+	go func() {
+		var err error
+		for {
+			_, err = f.Read(b)
+			if err != nil {
+				break
+			}
+		}
+		fmt.Println("got err", err)
+		cancel()
+	}()
+	return ctx, nil
 }
 
 func pprofHandlers(h http.Handler) http.Handler {

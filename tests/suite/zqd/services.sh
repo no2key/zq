@@ -1,17 +1,7 @@
 #!/bin/bash
 
-function awaitfile {
-  file=$1
-  i=0
-  until [ -f $file ]; do
-    let i+=1
-    if [ $i -gt 5 ]; then
-      echo "timed out waiting for file \"$file\" to appear"
-      exit 1
-    fi
-    sleep 1
-  done
-}
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+source $(DIR)/awaitfile.sh
 
 zqdroot=$1
 if [ -z "$zqdroot" ]; then
