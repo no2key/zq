@@ -142,7 +142,7 @@ in a single pass.
 The data section contains raw data values organized into "segments",
 where a segment is simply a seek offset and byte length relative to the
 data section.  Each segment contains a sequence of
-primitive-type zng values](https://github.com/brimsec/zq/blob/zst/zng/docs/spec.md#5-primitive-types),
+[primitive-type zng values](https://github.com/brimsec/zq/blob/zst/zng/docs/spec.md#5-primitive-types),
 encoded as counted-length byte sequences where the counted-length is
 variable-length encoded as in the zng spec.
 
@@ -203,15 +203,16 @@ from column streams, i.e., to map columns back to rows.
 > leverages zng.
 
 The reassembly section is a zng stream.  Unlike parquet,
-which uses an externally described schema (via Thrift) to describe
+which uses an externally described schema
+(via [Thrift](https://thrift.apache.org/)) to describe
 analogous data structures, we simply reuse zng here.
 
 > So, we are using zng to encode zng in column format.  Yo dawg.
 
 #### The Schema Definitions
 
-This zng stream encodes 2*N+1 zng records, where N is equal to the number
-of top-level zng record types that are presented in the encoded input.
+This reassembly zng stream encodes 2*N+1 zng records, where N is equal to the number
+of top-level zng record types that are present in the encoded input.
 To simply terminology, we call a top-level zng record type a "schema",
 e.g., there are N unique schemas encoded in the zst object.
 
@@ -452,68 +453,98 @@ using the same selector value within the union value.
 0:[goodnight;gracie;]
 ```
 
-Vectors would be laid out like this:
+Segments would be laid out like this:
 ```
+=== column for a
 hello
 goodnight
+=== column for b
 world
 gracie
+=== column for schema IDs
 0
 0
+===
 ```
-
-> Note the vector section here is just a toy example shown as text but this
-> data would all be zng-encoded values in accordance with their data types.
-
-The root types definitions:
+First, the schemas are defined (just one here):
 ```
 #0:record[a:string,b:string]
 0:[-;-;]
 ```
 
-> XXX TBD: fix this example to conform to latest stuff
+Then, root reassembly record:
+```
+#1:record[root:array[record[offset:int64,length:int32]]]
+1:[[[29;2;]]]
+```
+Next comes the column reassembly records (again, only schema in this
+example, so only one such record):
+```
+#2:record[a:record[column:array[record[offset:int64,length:int32]],presence:array[record[offset:int64,length:int32]]],b:record[column:array[record[offset:int64,length:int32]],presence:array[record[offset:int64,length:int32]]]]a
+2:[[[[0;16;]][]][[[16;13;]][]]]
+```
+And finally, the trailer as a new zng stream:
+```
+#0:record[magic:string,version:int32,skew_thresh:int32,segment_thresh:int32,sections:array[int64]]
+0:[zst;1;26214400;5242880;[31;94;]]
+```
 
-The root columns:
+All of this can be viewed a bit more easily in json...
+For example, you can use the zst command like this:
 ```
-#storage=array[record[offset:uint64,len:uint32]]
-#0:record[info:string,column:storage]
-0:[root;[[26;2;]]]
-#primitive_column=storage
-#1:record[a:record[column:primitive_column,presence:storage],b:record[column:primitive_column,presence:storage]]]
-1:[[[[0;14;]]-;][[[14;26;]]-;]]
+zst inspect -t -R -trailer hello.zst
 ```
-viewed a bit more easily as json:
+to get the output above, but it's all a bit more easily viewed as json,
+so you can do this too...
+```
+zst inspect -f ndjson -R -trailer hello.zst | jq
+```
+to view it all a bit more easily (with loss of information due to json):
 ```
 {
-  "info": "root"
-  "column": [
+  "a": null,
+  "b": null
+}
+{
+  "root": [
     {
-      "offset": 26
-      "len": 2,
+      "length": 2,
+      "offset": 29
     }
-  ],
+  ]
 }
 {
   "a": {
     "column": [
       {
+        "length": 16,
         "offset": 0
-        "len": 14,
       }
     ],
-    "presence": null
+    "presence": []
   },
   "b": {
     "column": [
       {
-        "offset": 14
-        "len": 26,
+        "length": 13,
+        "offset": 16
       }
     ],
-    "presence": null
+    "presence": []
   }
+}
+{
+  "magic": "zst",
+  "sections": [
+    31,
+    94
+  ],
+  "segment_thresh": 5242880,
+  "skew_thresh": 26214400,
+  "version": 1
 }
 ```
 
-If there were 10MB of zng row data, these root records would be the same size
-and just have different numbers for the vector seek ranges.
+> Note finally, if there were 10MB of zng row data here, the reassembly section
+> would be basically the same size, with perhaps a few segmaps.  This emphasizes
+> just how small this data structure is compared to the data section.

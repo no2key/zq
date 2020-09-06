@@ -38,6 +38,7 @@ type Writer struct {
 	// needed for reader-side buffering.  So when the memory footprint
 	// exceeds the confired skew theshhold, we flush the columns to storage.
 	footprint int
+	root      *column.IntWriter
 }
 
 func NewWriter(zctx *resolver.Context, path string, skewThresh, segThresh int) (*Writer, error) {
@@ -56,15 +57,17 @@ func NewWriter(zctx *resolver.Context, path string, skewThresh, segThresh int) (
 		return nil, err
 	}
 	writer := bufwriter.New(w)
+	spiller := column.NewSpiller(writer, segThresh)
 	return &Writer{
 		zctx:       zctx,
 		rctx:       resolver.NewContext(),
 		uri:        uri,
-		spiller:    column.NewSpiller(writer, segThresh),
+		spiller:    spiller,
 		writer:     writer,
 		schemaMap:  make(map[int]int),
 		skewThresh: skewThresh,
 		segThresh:  segThresh,
+		root:       column.NewIntWriter(spiller),
 	}, nil
 }
 
@@ -91,6 +94,9 @@ func (w *Writer) Write(rec *zng.Record) error {
 		rw := column.NewRecordWriter(recType, w.spiller)
 		w.schemas = append(w.schemas, rw)
 		w.types = append(w.types, recType)
+	}
+	if err := w.root.Write(int32(schemaID)); err != nil {
+		return err
 	}
 	if err := w.schemas[schemaID].Write(rec.Raw); err != nil {
 		return err
@@ -127,7 +133,7 @@ func (w *Writer) flush() error {
 			return err
 		}
 	}
-	return nil
+	return w.root.Flush()
 }
 
 func (w *Writer) finalize() error {
@@ -139,12 +145,11 @@ func (w *Writer) finalize() error {
 	// we start writing zng at this point.
 	zw := zngio.NewWriter(w.writer, zio.WriterFlags{})
 	dataSize := w.spiller.Position()
-
+	var b zcode.Builder
 	// First, write out empty records for each schemas.  These types
 	// are in the type context of the zng row reeader used to ingest
 	// all of the data.  Since they are put here first, when they are
 	// read fresh by the zst reader, the will exactly match the original schemas.
-	var b zcode.Builder
 	for _, schema := range w.types {
 		b.Reset()
 		for _, col := range schema.Columns {
@@ -158,6 +163,20 @@ func (w *Writer) finalize() error {
 		if err := zw.Write(rec); err != nil {
 			return err
 		}
+	}
+	// Next, write the root reassembly record.
+	b.Reset()
+	typ, err := w.root.Encode(w.rctx, &b)
+	if err != nil {
+		return err
+	}
+	rootType, err := w.rctx.LookupTypeRecord([]zng.Column{{"root", typ}})
+	if err != nil {
+		return err
+	}
+	rec := zng.NewRecord(rootType, b.Bytes())
+	if err := zw.Write(rec); err != nil {
+		return err
 	}
 	// Now, write out the reassembly record for each schema.  Each record
 	// is highly nested and encodes all of the segmaps for every column stream
