@@ -124,8 +124,8 @@ in this order:
 * the reassembly section,
 * and the trailer.
 
-Thus layout is designed so an implementation can buffer metadata in
-memory and write column data as vectors in a natural order to the
+This layout is designed so that an implementation can buffer metadata in
+memory while writing column data in a natural order to the
 data section (based on the volume statistics of each column),
 then write the metadata into the reassembly section along with the trailer
 at the end.  This allows a zng stream to be converted to a zst object
@@ -151,8 +151,8 @@ to one another or how they are reconstructed into columns.  They are just
 blobs of zng data.
 
 > Unlike parquet, there is no explicit arrangement the column chunks into
-> row groups but rather allow them to grow at different rates so a
-> high-volume column might be comprised of many vectors while a low-volume
+> row groups but rather they are allowed to grow at different rates so a
+> high-volume column might be comprised of many segments while a low-volume
 > column must just one or several.  This allows scans of low-volume record types
 > (the "mice") to perform well amongst high-volume record types (the "elephants"),
 > i.e., there are not a bunch of seeks with tiny reads of mice data interspersed
@@ -169,7 +169,7 @@ blobs of zng data.
 > read that lives under the column stream reader.  Also, you can make tradeoffs:
 > if you use lots of buffering on ingest, you can write the mice in front of the
 > elephants so the read path requires less buffering to align columns.  Or you can
-> do two passes where you store vectors in separate files them merge them at close
+> do two passes where you store segments in separate files them merge them at close
 > according to an optimization plan.
 
 Segments are sub-divided into frames where each frame is compressed
@@ -179,7 +179,7 @@ independently of each other, similar to zng compression framing.
 > [same compression format](https://github.com/brimsec/zq/blob/master/zng/docs/spec.md#313-compressed-value-message-block)
 > exactly?
 
-> The intent here is that vectors are sized so that sequential read access
+> The intent here is that segments are sized so that sequential read access
 > performs well (e.g., 5MB) while frames are comparatively smaller (say 32KB)
 > so that they can be decompressed and processed in a multi-threaded fashion where
 > search and analytics can be performed on the decompressed buffer by the same
@@ -197,7 +197,7 @@ from column streams, i.e., to map columns back to rows.
 > the original rows.  How performant this is all done is up to any particular
 > zst implementation.
 
-> Also, the reassembly section is in generally vastly smaller than the vector section
+> Also, the reassembly section is in generally vastly smaller than the data section
 > so the goal here isn't to express information in cute and obscure compact forms
 > but rather to represent data in easy-to-digest, programmer-friendly form that
 > leverages zng.
@@ -379,19 +379,21 @@ Instead the presence column is encoded as a sequence of alternating runs.
 First, the number of values present is encoded, then the number of values not present,
 then the number of values present, and so forth.   These runs are the stored
 as zng int32 values in the presence column (which may be subject to further
-compression based on vector framing).
+compression based on segment framing).
 
 ### The Trailer
 
 After the reassembly section is a zng stream with a single record defining
 the "trailer" of the zst object.  The trailer provides a magic field
 indicating the "zst" format, a version number,
-the size of the frame threshold for decomposing vectors into frames,
+the size of the segment threshold for decomposing segments into frames,
+the size of the skew threshold for flushing all segments to storage when
+the memory footprint roughly exceeds this threshold,
 and an array of sizes in bytes of the sections of the zst object.
 
 This type of this record has the format
 ```
-record[magic:string,version:int32,skew_thresh:int32,col_thresh:int32,sections:array[int64]]
+record[magic:string,version:int32,skew_thresh:int32,segment_thresh:int32,sections:array[int64]]
 ```
 The trailer can be efficiently found by scanning backward from the end of the
 zst object to the find a valid zng stream containing a single record value

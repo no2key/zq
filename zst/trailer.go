@@ -13,11 +13,11 @@ import (
 )
 
 const (
-	MagicField      = "magic"
-	VersionField    = "version"
-	SkewThreshField = "skew_thresh"
-	ColThreshField  = "col_thresh"
-	SectionsField   = "sections"
+	MagicField         = "magic"
+	VersionField       = "version"
+	SkewThreshField    = "skew_thresh"
+	SegmentThreshField = "segment_thresh"
+	SectionsField      = "sections"
 
 	MagicVal   = "zst"
 	VersionVal = 1
@@ -28,22 +28,22 @@ const (
 // XXX we should make generic trailer package and share between microindex and zst
 
 type Trailer struct {
-	Magic      string
-	Version    int
-	SkewThresh int
-	ColThresh  int
-	Sections   []int64
+	Magic         string
+	Version       int
+	SkewThresh    int
+	SegmentThresh int
+	Sections      []int64
 }
 
 var ErrNotZst = errors.New("not a zst object")
 
-func newTrailerRecord(zctx *resolver.Context, skewThresh, colThresh int, sections []int64) (*zng.Record, error) {
+func newTrailerRecord(zctx *resolver.Context, skewThresh, segmentThresh int, sections []int64) (*zng.Record, error) {
 	sectionsType := zctx.LookupTypeArray(zng.TypeInt64)
 	cols := []zng.Column{
 		{MagicField, zng.TypeString},
 		{VersionField, zng.TypeInt32},
 		{SkewThreshField, zng.TypeInt32},
-		{ColThreshField, zng.TypeInt32},
+		{SegmentThreshField, zng.TypeInt32},
 		{SectionsField, sectionsType},
 	}
 	typ, err := zctx.LookupTypeRecord(cols)
@@ -55,7 +55,7 @@ func newTrailerRecord(zctx *resolver.Context, skewThresh, colThresh int, section
 		zng.EncodeString(MagicVal),
 		zng.EncodeInt(VersionVal),
 		zng.EncodeInt(int64(skewThresh)),
-		zng.EncodeInt(int64(colThresh)),
+		zng.EncodeInt(int64(segmentThresh)),
 		encodeSections(sections)), nil
 }
 

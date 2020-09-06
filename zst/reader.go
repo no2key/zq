@@ -24,8 +24,6 @@ type Reader struct {
 	schemas []column.RecordWriter
 	//XXX don't think we need types because they will be passed to the column reader
 	//types      []*zng.TypeRecord
-	skewThresh int
-	colThresh  int
 	trailer    *Trailer
 	trailerLen int
 	size       int64
@@ -67,8 +65,8 @@ func NewReaderFromURI(zctx *resolver.Context, uri iosrc.URI) (*Reader, error) {
 	if trailer.SkewThresh > MaxSkewThresh {
 		return nil, fmt.Errorf("%s: skew threshold too large (%d)", uri, trailer.SkewThresh)
 	}
-	if trailer.ColThresh > MaxColThresh {
-		return nil, fmt.Errorf("%s: column threshold too large (%d)", uri, trailer.ColThresh)
+	if trailer.SegmentThresh > MaxSegmentThresh {
+		return nil, fmt.Errorf("%s: column threshold too large (%d)", uri, trailer.SegmentThresh)
 	}
 	return &Reader{
 		reader:     r,

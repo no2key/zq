@@ -13,10 +13,10 @@ import (
 	"github.com/brimsec/zq/zst/column"
 )
 
-//XXX
+//XXX TBD: implement skew threshold flushing
 const (
-	MaxColThresh  = 20 * 1024 * 1024
-	MaxSkewThresh = 512 * 1024 * 1024
+	MaxSegmentThresh = 20 * 1024 * 1024
+	MaxSkewThresh    = 512 * 1024 * 1024
 )
 
 // Writer implements the zbuf.Writer interface. A Writer creates a columnar
@@ -31,7 +31,7 @@ type Writer struct {
 	schemas    []column.RecordWriter
 	types      []*zng.TypeRecord
 	skewThresh int
-	colThresh  int
+	segThresh  int
 	// We keep track of the size of rows we've encoded into in-memory
 	// data structures.  This is roughtly propertional to the amount of
 	// memory used and the max amount of skew between rows that will be
@@ -40,11 +40,11 @@ type Writer struct {
 	footprint int
 }
 
-func NewWriter(zctx *resolver.Context, path string, skewThresh, colThresh int) (*Writer, error) {
+func NewWriter(zctx *resolver.Context, path string, skewThresh, segThresh int) (*Writer, error) {
 	if err := checkThresh("skew", MaxSkewThresh, skewThresh); err != nil {
 		return nil, err
 	}
-	if err := checkThresh("column", MaxColThresh, colThresh); err != nil {
+	if err := checkThresh("column", MaxSegmentThresh, segThresh); err != nil {
 		return nil, err
 	}
 	uri, err := iosrc.ParseURI(path)
@@ -60,11 +60,11 @@ func NewWriter(zctx *resolver.Context, path string, skewThresh, colThresh int) (
 		zctx:       zctx,
 		rctx:       resolver.NewContext(),
 		uri:        uri,
-		spiller:    column.NewSpiller(writer, colThresh),
+		spiller:    column.NewSpiller(writer, segThresh),
 		writer:     writer,
 		schemaMap:  make(map[int]int),
 		skewThresh: skewThresh,
-		colThresh:  colThresh,
+		segThresh:  segThresh,
 	}, nil
 }
 
@@ -180,16 +180,16 @@ func (w *Writer) finalize() error {
 	zw.EndStream()
 	columnSize := zw.Position()
 	sizes := []int64{dataSize, columnSize}
-	return writeTrailer(zw, w.rctx, w.skewThresh, w.colThresh, sizes)
+	return writeTrailer(zw, w.rctx, w.skewThresh, w.segThresh, sizes)
 }
 
 func (w *Writer) writeEmptyTrailer() error {
 	zw := zngio.NewWriter(w.writer, zio.WriterFlags{})
-	return writeTrailer(zw, w.rctx, w.skewThresh, w.colThresh, nil)
+	return writeTrailer(zw, w.rctx, w.skewThresh, w.segThresh, nil)
 }
 
-func writeTrailer(w *zngio.Writer, zctx *resolver.Context, skewThresh, colThresh int, sizes []int64) error {
-	rec, err := newTrailerRecord(zctx, skewThresh, colThresh, sizes)
+func writeTrailer(w *zngio.Writer, zctx *resolver.Context, skewThresh, segThresh int, sizes []int64) error {
+	rec, err := newTrailerRecord(zctx, skewThresh, segThresh, sizes)
 	if err != nil {
 		return err
 	}
