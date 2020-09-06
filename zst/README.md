@@ -480,7 +480,7 @@ Then, root reassembly record:
 Next comes the column reassembly records (again, only schema in this
 example, so only one such record):
 ```
-#2:record[a:record[column:array[record[offset:int64,length:int32]],presence:array[record[offset:int64,length:int32]]],b:record[column:array[record[offset:int64,length:int32]],presence:array[record[offset:int64,length:int32]]]]a
+#2:record[a:record[column:array[record[offset:int64,length:int32]],presence:array[record[offset:int64,length:int32]]],b:record[column:array[record[offset:int64,length:int32]],presence:array[record[offset:int64,length:int32]]]]
 2:[[[[0;16;]][]][[[16;13;]][]]]
 ```
 And finally, the trailer as a new zng stream:
