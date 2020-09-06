@@ -20,16 +20,18 @@ parquet directly with zng but felt a new format was warranted and important
 
 > TBD: add support for multi-file zst objects.
 
+> TBD: add support for zng set types.
+
 > TBD: add support for more efficient seekability (compared to brute force
 > parsing of all the root ids).  However we do this, it will probably be the
 > right opportunity to add arbitrary zng meta data for pruning (e.g., numeric
 > min,max,sum,small-set summaries,cardinality).  We also probably need to add
-> columns counts and byte sizes in various places to optimize things and provide
+> column counts and byte sizes in various places to optimize things and provide
 > for scanning stats.  Also, being able to do push-down with multiple, parallel
 > queries could be useful when the app wants to assemble a splash page or
 > run about of complex, interrelated queries to populate sophisticated views etc.
 
-> TBD: add examples
+> TBD: add more examples.
 
 ## The Zng Data Model
 
