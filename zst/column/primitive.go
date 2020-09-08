@@ -1,6 +1,9 @@
 package column
 
 import (
+	"io"
+	"io/ioutil"
+
 	"github.com/brimsec/zq/zcode"
 	"github.com/brimsec/zq/zng"
 	"github.com/brimsec/zq/zng/resolver"
@@ -49,4 +52,23 @@ func (p *PrimitiveWriter) Encode(zctx *resolver.Context, b *zcode.Builder) (zng.
 	}
 	b.EndContainer()
 	return zctx.LookupByName(SegmapTypeString)
+}
+
+type PrimitiveReader struct {
+	iter zcode.Iter
+}
+
+func NewPrimitiveReader(reader io.Reader) (*PrimitiveReader, error) {
+	b, err := ioutil.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+	return &PrimitiveReader{
+		iter: zcode.Iter(b),
+	}, nil
+}
+
+func (p *PrimitiveReader) Read() (zcode.Bytes, error) {
+	zv, _, err := p.iter.Next()
+	return zv, err
 }

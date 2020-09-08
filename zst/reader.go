@@ -102,7 +102,6 @@ func (r *Reader) section(level int) (int64, int64) {
 	return off, r.trailer.Sections[level]
 }
 
-//XXX might not need sectionOff here?  should be hanlded by scanning plan.
 func (r *Reader) newSectionReader(zctx *resolver.Context, level int, sectionOff int64) zbuf.Reader {
 	off, len := r.section(level)
 	off += sectionOff

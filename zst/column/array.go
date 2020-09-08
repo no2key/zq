@@ -1,6 +1,8 @@
 package column
 
 import (
+	"io"
+
 	"github.com/brimsec/zq/zcode"
 	"github.com/brimsec/zq/zng"
 	"github.com/brimsec/zq/zng/resolver"
@@ -60,4 +62,17 @@ func (a *ArrayWriter) Encode(zctx *resolver.Context, b *zcode.Builder) (zng.Type
 		{"lengths", lenType},
 	}
 	return zctx.LookupTypeRecord(cols)
+}
+
+type ArrayReader struct {
+}
+
+func NewArrayReader(inner zng.Type, r io.Reader) (*ArrayReader, error) {
+	//XXX
+	return nil, nil
+}
+
+func (r *ArrayReader) Read() (zcode.Bytes, error) {
+	//XXX
+	return nil, nil
 }

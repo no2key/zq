@@ -2,6 +2,7 @@ package column
 
 import (
 	"errors"
+	"io"
 
 	"github.com/brimsec/zq/zcode"
 	"github.com/brimsec/zq/zng"
@@ -108,4 +109,37 @@ func (f *FieldWriter) encode(zctx *resolver.Context, b *zcode.Builder) (zng.Type
 		{"presence", presenceType},
 	}
 	return zctx.LookupTypeRecord(cols)
+}
+
+type RecordReader struct {
+}
+
+func NewRecordReader(typ *zng.TypeRecord, r io.Reader) (*RecordReader, error) {
+	//XXX
+	return nil, nil
+}
+
+func (r *RecordReader) Read() (zcode.Bytes, error) {
+	//XXX
+	return nil, nil
+}
+
+type FieldReader struct {
+	column   Reader
+	presence *PresenceReader
+}
+
+func NewFieldReader(typ zng.Type, r io.Reader) (*FieldReader, error) {
+	column, err := NewReader(typ, r)
+	if err != nil {
+		return nil, err
+	}
+	presence, err := NewPresenceReader(r)
+	if err != nil {
+		return nil, err
+	}
+	return &FieldReader{
+		column:   column,
+		presence: presence,
+	}, nil
 }

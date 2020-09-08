@@ -2,6 +2,7 @@ package column
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/brimsec/zq/zcode"
 	"github.com/brimsec/zq/zng"
@@ -70,4 +71,17 @@ func (u *UnionWriter) Encode(zctx *resolver.Context, b *zcode.Builder) (zng.Type
 	cols = append(cols, zng.Column{"selector", typ})
 	b.EndContainer()
 	return zctx.LookupTypeRecord(cols)
+}
+
+type UnionReader struct {
+}
+
+func NewUnionReader(typ zng.Type, r io.Reader) (*UnionReader, error) {
+	//XXX
+	return nil, nil
+}
+
+func (r *UnionReader) Read() (zcode.Bytes, error) {
+	//XXX
+	return nil, nil
 }
