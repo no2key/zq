@@ -15,7 +15,7 @@ import (
 
 //XXX TBD: implement skew threshold flushing
 const (
-	MaxSegmentThresh = 20 * 1024 * 1024
+	MaxSegmentThresh = column.MaxSegmentThresh
 	MaxSkewThresh    = 512 * 1024 * 1024
 )
 

@@ -23,18 +23,19 @@ type IntReader struct {
 	PrimitiveReader
 }
 
-func NewIntReader(reader io.Reader) (*IntReader, error) {
-	p, err := NewPrimitiveReader(reader)
+func NewIntReader(segmap zng.Value, reader io.ReaderAt) (*IntReader, error) {
+	p, err := NewPrimitiveReader(segmap, reader)
 	if err != nil {
 		return nil, err
 	}
 	return &IntReader{*p}, err
 }
 
-func (p *IntReader) Read() (int64, error) {
-	b, err := p.PrimitiveReader.Read()
+func (p *IntReader) Read() (int32, error) {
+	zv, _, err := p.iter.Next()
 	if err != nil {
 		return 0, err
 	}
-	return zng.DecodeInt(b)
+	v, err := zng.DecodeInt(zv)
+	return int32(v), err
 }

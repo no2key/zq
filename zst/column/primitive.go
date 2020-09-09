@@ -1,8 +1,8 @@
 package column
 
 import (
+	"errors"
 	"io"
-	"io/ioutil"
 
 	"github.com/brimsec/zq/zcode"
 	"github.com/brimsec/zq/zng"
@@ -55,20 +55,59 @@ func (p *PrimitiveWriter) Encode(zctx *resolver.Context, b *zcode.Builder) (zng.
 }
 
 type PrimitiveReader struct {
-	iter zcode.Iter
+	iter   zcode.Iter
+	segmap []Segment
+	reader io.ReaderAt
 }
 
-func NewPrimitiveReader(reader io.Reader) (*PrimitiveReader, error) {
-	b, err := ioutil.ReadAll(reader)
+func NewPrimitiveReader(zv zng.Value, reader io.ReaderAt) (*PrimitiveReader, error) {
+	segmap, err := parseSegmap(zv)
+	if err != nil {
+		return nil, err
+	}
 	if err != nil {
 		return nil, err
 	}
 	return &PrimitiveReader{
-		iter: zcode.Iter(b),
+		segmap: segmap,
+		reader: reader,
 	}, nil
 }
 
-func (p *PrimitiveReader) Read() (zcode.Bytes, error) {
+func (p *PrimitiveReader) Read(b *zcode.Builder) error {
+	if p.iter == nil || p.iter.Done() {
+		if len(p.segmap) == 0 {
+			return io.EOF
+		}
+		if err := p.next(); err != nil {
+			return err
+		}
+	}
 	zv, _, err := p.iter.Next()
-	return zv, err
+	if err != nil {
+		return err
+	}
+	b.AppendPrimitive(zv)
+	return nil
+}
+
+func (p *PrimitiveReader) next() error {
+	segment := p.segmap[0]
+	p.segmap = p.segmap[1:]
+	if segment.Length > 2*MaxSegmentThresh {
+		return errors.New("segment too big")
+	}
+	b := make([]byte, segment.Length)
+	//XXX this where lots of seeks can happen until we put intelligent
+	// scheduling in a layer below this informed by the reassembly maps
+	// and the query that is going to run.
+	n, err := p.reader.ReadAt(b, segment.Offset)
+	if err != nil {
+		return err
+	}
+	if n < int(segment.Length) {
+		return errors.New("truncated read of zst column")
+	}
+	p.iter = zcode.Iter(b)
+	return nil
 }

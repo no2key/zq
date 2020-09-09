@@ -3,6 +3,8 @@ package column
 import (
 	"errors"
 	"io"
+
+	"github.com/brimsec/zq/zng"
 )
 
 type PresenceWriter struct {
@@ -47,8 +49,8 @@ type PresenceReader struct {
 	run   int
 }
 
-func NewPresenceReader(r io.Reader) (*PresenceReader, error) {
-	ir, err := NewIntReader(r)
+func NewPresenceReader(segmap zng.Value, r io.ReaderAt) (*PresenceReader, error) {
+	ir, err := NewIntReader(segmap, r)
 	if err != nil {
 		return nil, err
 	}

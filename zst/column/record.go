@@ -9,14 +9,6 @@ import (
 	"github.com/brimsec/zq/zng/resolver"
 )
 
-type FieldWriter struct {
-	name     string
-	column   Writer
-	presence *PresenceWriter
-	vcnt     int
-	ucnt     int
-}
-
 type RecordWriter []FieldWriter
 
 func NewRecordWriter(typ *zng.TypeRecord, spiller *Spiller) RecordWriter {
@@ -93,6 +85,14 @@ func (r RecordWriter) Encode(zctx *resolver.Context, b *zcode.Builder) (zng.Type
 	return zctx.LookupTypeRecord(columns)
 }
 
+type FieldWriter struct {
+	name     string
+	column   Writer
+	presence *PresenceWriter
+	vcnt     int
+	ucnt     int
+}
+
 func (f *FieldWriter) encode(zctx *resolver.Context, b *zcode.Builder) (zng.Type, error) {
 	b.BeginContainer()
 	colType, err := f.column.Encode(zctx, b)
@@ -111,35 +111,88 @@ func (f *FieldWriter) encode(zctx *resolver.Context, b *zcode.Builder) (zng.Type
 	return zctx.LookupTypeRecord(cols)
 }
 
-type RecordReader struct {
+type RecordReader []FieldReader
+
+func NewRecordReader(typ *zng.TypeRecord, reassembly zng.Value, reader io.ReaderAt) (RecordReader, error) {
+	var r RecordReader
+	rtype, ok := reassembly.Type.(*zng.TypeRecord)
+	if !ok {
+		return nil, errors.New("corrupt zst object: record_column is not a record")
+	}
+	k := 0
+	for it := zcode.Iter(reassembly.Bytes); !it.Done(); k++ {
+		zv, _, err := it.Next()
+		if err != nil {
+			return nil, err
+		}
+		if k >= len(typ.Columns) {
+			return nil, errors.New("mismatch between record type and record_column") //XXX
+		}
+		fieldType := typ.Columns[k].Type
+		f, err := NewFieldReader(fieldType, zng.Value{rtype.Columns[k].Type, zv}, reader)
+		if err != nil {
+			return nil, err
+		}
+		r = append(r, *f)
+	}
+	return r, nil
 }
 
-func NewRecordReader(typ *zng.TypeRecord, r io.Reader) (*RecordReader, error) {
-	//XXX
-	return nil, nil
-}
-
-func (r *RecordReader) Read() (zcode.Bytes, error) {
-	//XXX
-	return nil, nil
+func (r RecordReader) Read(b *zcode.Builder) error {
+	b.BeginContainer()
+	for _, f := range r {
+		if err := f.Read(b); err != nil {
+			return err
+		}
+	}
+	b.EndContainer()
+	return nil
 }
 
 type FieldReader struct {
-	column   Reader
-	presence *PresenceReader
+	isContainer bool
+	column      Reader
+	presence    *PresenceReader
 }
 
-func NewFieldReader(typ zng.Type, r io.Reader) (*FieldReader, error) {
-	column, err := NewReader(typ, r)
+func NewFieldReader(typ zng.Type, reassembly zng.Value, r io.ReaderAt) (*FieldReader, error) {
+	rtype, ok := reassembly.Type.(*zng.TypeRecord)
+	if !ok {
+		return nil, errors.New("zst object array_column not a record")
+	}
+	rec := zng.NewRecord(rtype, reassembly.Bytes)
+	zv, err := rec.Access("column")
 	if err != nil {
 		return nil, err
 	}
-	presence, err := NewPresenceReader(r)
+	column, err := NewReader(typ, zv, r)
 	if err != nil {
 		return nil, err
 	}
+	zv, err = rec.Access("presence")
+	if err != nil {
+		return nil, err
+	}
+	presence, err := NewPresenceReader(zv, r)
 	return &FieldReader{
-		column:   column,
-		presence: presence,
+		isContainer: zng.IsContainerType(typ),
+		column:      column,
+		presence:    presence,
 	}, nil
+}
+
+func (f *FieldReader) Read(b *zcode.Builder) error {
+	isval, err := f.presence.Read()
+	if err != nil {
+		return err
+	}
+	if isval {
+		return f.column.Read(b)
+	}
+	if f.isContainer {
+		b.AppendContainer(nil)
+	} else {
+		b.AppendPrimitive(nil)
+	}
+	return nil
 }

@@ -1,11 +1,13 @@
 package zst
 
 import (
+	"errors"
 	"fmt"
 	"io"
 
 	"github.com/brimsec/zq/pkg/iosrc"
 	"github.com/brimsec/zq/zbuf"
+	"github.com/brimsec/zq/zcode"
 	"github.com/brimsec/zq/zio/zngio"
 	"github.com/brimsec/zq/zng"
 	"github.com/brimsec/zq/zng/resolver"
@@ -16,17 +18,16 @@ import (
 // zst object to generate a stream of zng.Records.  It also has methods
 // to read metainformation for test and debugging.
 type Reader struct {
-	reader iosrc.Reader
-	zctx   *resolver.Context
-	uri    iosrc.URI
-	// TBD
-	//schemas     []column.RecordReader
-	schemas []column.RecordWriter
-	//XXX don't think we need types because they will be passed to the column reader
-	//types      []*zng.TypeRecord
+	reader     iosrc.Reader
+	zctx       *resolver.Context
+	uri        iosrc.URI
+	root       *column.IntReader
+	schemas    []column.RecordReader
+	types      []*zng.TypeRecord
 	trailer    *Trailer
 	trailerLen int
 	size       int64
+	builder    zcode.Builder
 }
 
 // NewReader returns a Reader ready to read a microindex.
@@ -90,7 +91,74 @@ func (r *Reader) IsEmpty() bool {
 }
 
 func (r *Reader) Read() (*zng.Record, error) {
-	panic("TBD")
+	if r.schemas == nil {
+		//XXX maybe do this in New?
+		if err := r.init(); err != nil {
+			return nil, err
+		}
+		if r.schemas == nil {
+			return nil, errors.New("no schemas found")
+		}
+	}
+	schemaID, err := r.root.Read()
+	if err == io.EOF {
+		return nil, nil
+	}
+	if schemaID < 0 || int(schemaID) >= len(r.schemas) {
+		return nil, errors.New("bad schema id in root reassembly column")
+	}
+	r.builder.Reset()
+	schema := r.schemas[schemaID]
+	err = schema.Read(&r.builder)
+	//XXX need to map r.types[] type to output zctx so the reassembly
+	// types won't, in general, interfere with the output type context
+	rec := zng.NewRecord(r.types[schemaID], r.builder.Bytes())
+	rec.Keep()
+	return rec, nil
+}
+
+func (r *Reader) init() error {
+	reader := r.NewReassemblyReader()
+	var rec *zng.Record
+	for {
+		rec, err := reader.Read()
+		if err != nil {
+			return err
+		}
+		if rec == nil {
+			return errors.New("no reassembly records found in zst file")
+		}
+		zv := rec.Value(0)
+		if zv.Bytes != nil {
+			break
+		}
+		r.types = append(r.types, rec.Type)
+	}
+	segmap, err := rec.Access("root")
+	if err != nil {
+		return err
+	}
+	r.root, err = column.NewIntReader(segmap, r.reader)
+	if err != nil {
+		return err
+	}
+	for k := 0; k < len(r.types); k++ {
+		rec, err := r.Read()
+		if err != nil {
+			return err
+		}
+		zv := zng.Value{rec.Type, rec.Raw}
+		reader, err := column.NewRecordReader(r.types[k], zv, r.reader)
+		if err != nil {
+			return err
+		}
+		r.schemas = append(r.schemas, reader)
+	}
+	rec, _ = r.Read()
+	if rec != nil {
+		return errors.New("extra records in reassembly section")
+	}
+	return nil
 }
 
 //XXX this should be a common method on Trailer and shared with microindexaxs
