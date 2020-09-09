@@ -113,6 +113,9 @@ func (r *Reader) Read() (*zng.Record, error) {
 	//XXX need to map r.types[] type to output zctx so the reassembly
 	// types won't, in general, interfere with the output type context
 	rec := zng.NewRecord(r.types[schemaID], r.builder.Bytes())
+	//XXX if we had a buffer pool where records could be built back to
+	// back in batches, then we could get rid of this extra allocation
+	// and copy on every record
 	rec.Keep()
 	return rec, nil
 }
